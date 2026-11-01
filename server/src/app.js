@@ -9,6 +9,9 @@ const MAX_PLAYERS = 300;
 const MAX_OUTS = 1000;
 const GRACE_MS = 15 * 60_000;
 const EVENTS_PER_MIN_PER_PID = 30;
+// A phone that has not sent anything for this long is reported as unreachable
+// (dead battery, no signal, app closed). Phones ping every ~30 s while open.
+const STALE_MS = 120_000;
 
 const ID = { type: "string", pattern: "^[a-z0-9]{4,12}$" };
 const PID = { type: "string", pattern: "^[A-Za-z0-9_-]{6,32}$" };
@@ -28,22 +31,28 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     methods: ["GET", "PUT", "POST"],
     maxAge: 86400,
   });
+  // Campus Wi-Fi puts hundreds of phones behind one IP, so the per-IP limit is
+  // only a safety net against runaway clients; fairness is enforced per pid below.
   app.register(rateLimit, { global: true, max: 30000, timeWindow: "1 minute" });
 
   const q = {
     game: db.prepare("SELECT * FROM games WHERE id = ?"),
-    insGame: db.prepare("INSERT INTO games (id,label,host_hash,start_at,end_at,created_at,expires_at) VALUES (?,?,?,?,?,?,?)"),
-    endGame: db.prepare("UPDATE games SET ended_at = ?, expires_at = MIN(expires_at, ? + ?) WHERE id = ? AND ended_at IS NULL"),
+    insGame: db.prepare("INSERT INTO games (id,label,host_hash,start_at,head_end,end_at,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?)"),
+    endGame: db.prepare("UPDATE games SET ended_at = ?, end_reason = ?, expires_at = MIN(expires_at, ? + ?) WHERE id = ? AND ended_at IS NULL"),
     nPlayers: db.prepare("SELECT COUNT(*) c FROM players WHERE game_id = ?"),
     getPlayer: db.prepare("SELECT * FROM players WHERE game_id = ? AND pid = ?"),
-    upPlayer: db.prepare(`INSERT INTO players (game_id,pid,name,role,key,updated_at) VALUES (@g,@pid,@name,@role,@key,@t)
-      ON CONFLICT (game_id,pid) DO UPDATE SET name=@name, role=@role, key=COALESCE(@key,key), updated_at=@t`),
+    upPlayer: db.prepare(`INSERT INTO players (game_id,pid,name,role,key,updated_at,seen_at) VALUES (@g,@pid,@name,@role,@key,@t,@t)
+      ON CONFLICT (game_id,pid) DO UPDATE SET name=@name, role=@role, key=COALESCE(@key,key), updated_at=@t, seen_at=@t`),
+    seen: db.prepare("UPDATE players SET seen_at = ? WHERE game_id = ? AND pid = ?"),
     nOuts: db.prepare("SELECT COUNT(*) c FROM outs WHERE game_id = ?"),
     insOut: db.prepare("INSERT OR IGNORE INTO outs (game_id,key,runner_name,hunter_pid,hunter_name,t) VALUES (?,?,?,?,?,?)"),
     setHunterOnOut: db.prepare("UPDATE outs SET hunter_pid=?, hunter_name=? WHERE game_id=? AND key=? AND hunter_pid IS NULL"),
     counts: db.prepare(`SELECT
+      (SELECT COUNT(*) FROM players WHERE game_id=@g) total,
       (SELECT COUNT(*) FROM players WHERE game_id=@g AND role='hunter') hunters,
+      (SELECT COUNT(*) FROM players WHERE game_id=@g AND role='runner') runners,
       (SELECT COUNT(*) FROM players WHERE game_id=@g AND role='runner' AND (key IS NULL OR key NOT IN (SELECT key FROM outs WHERE game_id=@g))) alive,
+      (SELECT COUNT(*) FROM players WHERE game_id=@g AND COALESCE(seen_at, updated_at) < @stale) unreachable,
       (SELECT COUNT(*) FROM outs WHERE game_id=@g) caught`),
     board: db.prepare(`SELECT hunter_name name, COUNT(*) catches FROM outs
       WHERE game_id=? AND hunter_pid IS NOT NULL GROUP BY hunter_pid ORDER BY catches DESC, MIN(t) ASC LIMIT 10`),
@@ -62,14 +71,40 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
   };
   const sweepHits = () => { const t = now(); for (const [k, v] of hits) if (!v.length || t - v[v.length - 1] > 60_000) hits.delete(k); };
 
-  const view = (g) => {
-    const c = q.counts.get({ g: g.id });
+  const countsOf = (g) => q.counts.get({ g: g.id, stale: now() - STALE_MS });
+
+  // Once every runner the server knows about is caught during the hunt, the
+  // game is over for everyone: hunters win. Checked on every read and write
+  // rather than on a timer so it is deterministic and survives restarts.
+  const settle = (g) => {
+    if (g.ended_at != null) return g;
+    const t = now();
+    if (t > g.end_at) return g; // time ran out; reported as timeUp below without locking the row (late reports still land)
+    if (g.head_end != null && t < g.head_end) return g;
+    const c = countsOf(g);
+    if (c.runners >= 1 && c.alive === 0 && c.caught >= 1) {
+      q.endGame.run(t, "allCaught", t, DAY, g.id);
+      return q.game.get(g.id);
+    }
+    return g;
+  };
+
+  const view = (g0) => {
+    const g = settle(g0);
+    const c = countsOf(g), t = now();
+    const ended = g.ended_at != null || t > g.end_at;
+    let result = null;
+    if (ended) {
+      const reason = g.end_reason || (g.ended_at != null ? "host" : "timeUp");
+      const winner = reason === "allCaught" ? "hunters" : reason === "timeUp" ? (c.alive > 0 ? "runners" : c.caught > 0 ? "hunters" : null) : null;
+      result = { reason, winner };
+    }
     return {
       id: g.id, label: g.label, startAt: g.start_at, endAt: g.end_at,
-      ended: g.ended_at != null, endedAt: g.ended_at,
-      players: { hunters: c.hunters, alive: c.alive }, caught: c.caught,
+      ended, endedAt: g.ended_at, result,
+      players: { hunters: c.hunters, alive: c.alive, runners: c.runners, total: c.total, unreachable: c.unreachable }, caught: c.caught,
       board: q.board.all(g.id), feed: q.feed.all(g.id),
-      serverTime: now(),
+      serverTime: t,
     };
   };
 
@@ -96,11 +131,14 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     const existing = q.game.get(id);
     if (existing) {
       if (!sameKey(existing.host_hash, b.hostKey)) return reply.code(403).send({ error: "id taken" });
+      noStore(reply);
       return view(existing);
     }
     let end = b.startAt + (b.headMin + b.durMin) * 60_000;
     if (b.endAt != null) end = Math.max(b.startAt, Math.min(end, b.endAt));
-    q.insGame.run(id, b.label, sha(b.hostKey).toString("hex"), b.startAt, end, t, end + DAY);
+    const headEnd = Math.min(end, b.startAt + b.headMin * 60_000);
+    q.insGame.run(id, b.label, sha(b.hostKey).toString("hex"), b.startAt, headEnd, end, t, end + DAY);
+    noStore(reply);
     return reply.code(201).send(view(q.game.get(id)));
   });
 
@@ -117,17 +155,22 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
       body: {
         type: "object", additionalProperties: false, required: ["pid", "name", "type"],
         properties: {
-          pid: PID, name: NAME, type: { enum: ["join", "catch", "out"] },
+          pid: PID, name: NAME, type: { enum: ["join", "catch", "out", "ping"] },
           role: { enum: ["runner", "hunter"] }, code: CODE,
           runner: { type: "object", additionalProperties: false, required: ["name", "code"], properties: { name: NAME, code: CODE } },
         },
       },
     },
   }, async (req, reply) => {
-    const g = q.game.get(req.params.id);
+    let g = q.game.get(req.params.id);
     if (!g) return reply.code(404).send({ error: "no such game" });
     const b = req.body, t = now();
-    if (g.ended_at != null || t > g.end_at + GRACE_MS) return reply.code(409).send({ error: "ended" });
+    g = settle(g);
+    // After the end, late catch/out reports from phones that were offline still
+    // land for a grace period (they only ever add or confirm outs). Joins and
+    // pings are refused once the game is over.
+    const lateReport = (b.type === "catch" || b.type === "out") && g.ended_at != null && t <= g.ended_at + GRACE_MS;
+    if ((g.ended_at != null && !lateReport) || t > g.end_at + GRACE_MS) return reply.code(409).send({ error: "ended", result: view(g).result });
     if (pidLimited(b.pid)) return reply.code(429).send({ error: "slow down" });
 
     if (b.type === "join") {
@@ -137,6 +180,8 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
       q.upPlayer.run({ g: g.id, pid: b.pid, name: b.name, role: b.role, key: b.code ? `${b.name}#${b.code}` : null, t });
     } else {
       if (!q.getPlayer.get(g.id, b.pid)) return reply.code(422).send({ error: "join first" });
+      q.seen.run(t, g.id, b.pid);
+      if (b.type === "ping") return reply.code(204).send();
       if (q.nOuts.get(g.id).c >= MAX_OUTS) return reply.code(422).send({ error: "too many events" });
       if (b.type === "catch") {
         if (!b.runner) return reply.code(400).send({ error: "runner required" });
@@ -147,6 +192,7 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
         if (!b.code) return reply.code(400).send({ error: "code required" });
         q.insOut.run(g.id, `${b.name}#${b.code}`, b.name, null, null, t);
       }
+      settle(g);
     }
     return reply.code(204).send();
   });
@@ -160,7 +206,8 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     const g = q.game.get(req.params.id);
     if (!g) return reply.code(404).send({ error: "no such game" });
     if (!sameKey(g.host_hash, req.body.hostKey)) return reply.code(403).send({ error: "not the host" });
-    q.endGame.run(now(), now(), DAY, g.id);
+    q.endGame.run(now(), "host", now(), DAY, g.id);
+    noStore(reply);
     return view(q.game.get(g.id));
   });
 
@@ -168,5 +215,6 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
   timer.unref();
   app.addHook("onClose", async () => { clearInterval(timer); db.close(); });
   app.decorate("purgeNow", () => q.purge.run(now()).changes);
+  app.decorate("dbSizeBytes", () => db.prepare("SELECT page_count * page_size AS b FROM pragma_page_count(), pragma_page_size()").get().b);
   return app;
 }
