@@ -31,3 +31,10 @@ ul{padding-left:1.2rem;margin:.3rem 0}
 .linkbox{word-break:break-all;font-size:.8rem;color:var(--muted);background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:6px}
 .log li{margin:2px 0}
 a{color:var(--accent)}
+.map{height:46vh;min-height:280px;border-radius:12px;margin:8px 0;border:1px solid var(--line)}
+.map.small{height:300px}
+.status{padding:10px;border-radius:10px;text-align:center;font-weight:700;background:var(--bg);margin-top:6px}
+.status.ok{color:var(--runner)}.status.out,.status.nogo{background:var(--hunter);color:#fff}
+.zr{align-items:center;margin:6px 0}.zr select{max-width:48%}
+button.sm{width:auto;margin:0;padding:6px 12px;font-size:.85rem;flex:none}
+textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:12px monospace;margin-top:8px}

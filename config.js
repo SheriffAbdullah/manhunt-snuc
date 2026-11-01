@@ -4,14 +4,6 @@ window.CAMPUS = {
   name: "SNUC",
   tagline: "Campus Manhunt",
 
-  // Pre-set play areas shown when a game master creates a game.
-  // Replace these with real, safe, well-lit areas on your campus.
-  zones: [
-    { id: "core", label: "Core Campus", rule: "Between the main gate, library and student centre." },
-    { id: "north", label: "North Quad", rule: "North Quad lawns and walkways only." },
-    { id: "full", label: "Full Campus", rule: "Anywhere inside the campus perimeter wall." },
-  ],
-
   // Always out of bounds, whatever zone is picked.
   offLimits: [
     "Roads and car parks",

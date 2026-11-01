@@ -68,6 +68,7 @@
         h("p", { class: "muted" }, "Random and private to this device. Nobody sees your real name."),
         h("button", { class: "ghost", onclick: () => { localStorage.removeItem("manhunt:codename"); home(); } }, "New codename")),
       h("button", { onclick: create }, "Host a game"),
+      h("button", { class: "ghost", onclick: () => { location.hash = "editor"; } }, "Map editor"),
       h("p", { class: "muted" }, "Got a link from your host? Just open it. It will bring you straight into the game."),
       rulesCard(),
     );
@@ -81,16 +82,21 @@
       h("p", { class: "muted" }, "Never run into traffic. Stop the game if anyone is hurt or uncomfortable."));
   }
 
-  function create() {
+  async function create() {
     clearTimer();
+    const lib = await MH.loadLibrary();
     const start = new Date(Date.now() + 15 * 60000);
-    const zone = h("select", { id: "zone" }, C.zones.map((z) => h("option", { value: z.id }, z.label)));
+    const about = h("p", { class: "muted" });
+    const zone = h("select", { id: "zone" }, lib.configs.map((c) => h("option", { value: c.id }, c.label)));
+    const showAbout = () => { about.textContent = (lib.configs.find((c) => c.id === zone.value) || {}).about || ""; };
+    zone.addEventListener("change", showAbout); showAbout();
     const when = h("input", { type: "datetime-local", id: "when", value: toLocalInput(start) });
     const head = h("input", { type: "number", id: "head", min: 0, max: 60, value: C.defaults.headStartMin });
     const dur = h("input", { type: "number", id: "dur", min: 5, max: 240, value: C.defaults.durationMin });
     mount(
       h("h1", {}, "Host a game"),
-      h("label", { for: "zone" }, "Play area"), zone,
+      h("label", { for: "zone" }, "Map"), zone, about,
+      h("button", { class: "ghost", onclick: () => { location.hash = "editor"; } }, "Edit or add maps"),
       h("label", { for: "when" }, "Start time"), when,
       h("div", { class: "row" },
         h("div", {}, h("label", { for: "head" }, "Head start (min)"), head),
@@ -100,10 +106,12 @@
           const s = new Date(when.value).getTime();
           if (!Number.isFinite(s)) return alert("Pick a valid start time.");
           const g = {
-            i: Math.random().toString(36).slice(2, 8), z: zone.value, s,
+            i: Math.random().toString(36).slice(2, 8), c: zone.value, s,
             h: Math.min(60, Math.max(0, +head.value || 0)),
             d: Math.min(240, Math.max(5, +dur.value || 45)), r: "r",
           };
+          // Custom maps only exist on this phone, so ship them inside the link.
+          if (lib.customConfigIds.has(g.c)) g.x = MH.pack(MH.resolve(lib, g.c));
           share(g);
         },
       }, "Create game"),
@@ -133,9 +141,10 @@
     );
   }
 
-  function play(g) {
+  async function play(g) {
     const name = codename();
-    const zone = C.zones.find((z) => z.id === g.z) || C.zones[0];
+    const lib = g.x ? null : await MH.loadLibrary();
+    const cfg = g.x ? MH.unpack(g.x) : MH.resolve(lib, g.c);
     const isHunter = g.r === "h";
     const keyOut = `manhunt:out:${g.i}`;
     const keyLog = `manhunt:log:${g.i}`;
@@ -192,7 +201,7 @@
     mount(
       h("div", {}, h("span", { class: `pill ${isHunter ? "hunter" : "runner"}` }, isHunter ? "Hunter" : "Runner"), " ", h("span", { class: "muted" }, name)),
       phase, clock, action,
-      h("div", { class: "card" }, h("strong", {}, zone.label), h("p", { class: "muted" }, zone.rule)),
+      mapCard(cfg),
       rulesCard(),
       h("button", { class: "ghost", onclick: () => { location.hash = ""; } }, "Leave game"),
     );
@@ -212,7 +221,38 @@
     timer = setInterval(tick, 1000);
   }
 
+  // Live map. Your position is read on this phone only and never sent anywhere.
+  function mapCard(cfg) {
+    if (!cfg) return h("div", { class: "card" }, "This map isn't available. Ask the host to resend the link.");
+    const el = h("div", { class: "map small" });
+    const status = h("div", { class: "status" }, "Location off");
+    const btn = h("button", { class: "ghost" }, "Show me on the map");
+    queueMicrotask(() => {
+      const map = MH.newMap(el);
+      const group = L.layerGroup().addTo(map);
+      MH.drawConfig(map, group, cfg);
+      let dot = null, watch = null, last = "ok";
+      btn.addEventListener("click", () => {
+        if (!navigator.geolocation) return (status.textContent = "Location not supported on this device.");
+        if (watch != null) return;
+        status.textContent = "Finding you...";
+        watch = navigator.geolocation.watchPosition((p) => {
+          const { latitude: la, longitude: lo } = p.coords;
+          dot ? dot.setLatLng([la, lo]) : (dot = L.circleMarker([la, lo], { radius: 8, color: "#fff", fillColor: "#4aa3ff", fillOpacity: 1, weight: 3 }).addTo(map));
+          const r = MH.check(cfg, la, lo);
+          status.className = "status " + r.s;
+          status.textContent = r.s === "ok" ? "In bounds" : r.s === "out" ? "OUT OF BOUNDS. Head back to the green area." : `NO-GO ZONE: ${r.n}. Leave now.`;
+          if (r.s !== "ok" && last === "ok" && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          last = r.s;
+        }, () => { watch = null; status.textContent = "Couldn't get your location. Allow it in browser settings."; }, { enableHighAccuracy: true, maximumAge: 5000 });
+        btn.remove();
+      });
+    });
+    return h("div", { class: "card" }, h("strong", {}, cfg.label), h("p", { class: "muted" }, "Green is where you play. Red is out of bounds."), el, status, btn);
+  }
+
   function route() {
+    if (location.hash === "#editor") { clearTimer(); return MHEditor.show({ h, mount, exit: () => { location.hash = ""; } }); }
     const g = readGame();
     g ? play(g) : home();
   }
