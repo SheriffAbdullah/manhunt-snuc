@@ -13,7 +13,8 @@ window.CAMPUS = {
     "Anywhere after dark outside lit paths",
   ],
 
-  // Shown on the Safety panel. Put real numbers here before launch.
+  // Shown on the Safety panel and the in-game SOS sheet. Put the real number here
+  // before launch; while it is empty the SOS sheet says so.
   safety: {
     label: "Campus security",
     phone: "",
