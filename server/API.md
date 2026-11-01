@@ -11,7 +11,7 @@ Body: `{ hostKey, label (1-40), startAt (ms epoch, within -1d..+30d), headMin (0
 - `201` created, `200` same host key again (returns current state), `403` id already used by another host, `400` invalid.
 - Game data is deleted 24 h after it ends (or 24 h after it is ended by the host).
 
-## `GET /v1/games/:id`: state (poll every ~5 s)
+## `GET /v1/games/:id[?pid=...]`: state (poll every ~5 s)
 `200`
 ```json
 { "id":"abc123", "label":"Friday Hunt", "startAt":0, "endAt":0,
@@ -25,6 +25,7 @@ Body: `{ hostKey, label (1-40), startAt (ms epoch, within -1d..+30d), headMin (0
 - `result` is `null` while the game runs, otherwise `{ reason, winner }` with `reason` one of `"host"` (winner `null`), `"allCaught"` (winner `"hunters"`), `"timeUp"` (winner `"runners"` if anyone is still alive, `"hunters"` if nobody is, `null` if nothing happened).
 - `endedAt` is set only for `host` and `allCaught` ends (the moment the server locked the game); `timeUp` leaves it `null` because the end time comes from the link.
 - `players.unreachable` counts phones that have not sent anything (join, ping, catch, out) for 2 minutes. No location is involved.
+- With `?pid=<my pid>` the response also carries `me`: `{ "role":"runner", "outAt":<ms or null>, "catches":<n> }` for that phone (`null` if the pid never joined). A runner whose phone was off while a hunter logged them learns it from `outAt`; a hunter sees how many catches the server credited them with. Unknown query fields are rejected (400).
 - `board` = top 10 hunters by catches. `feed` = latest 15 catches/outs (`hunter` is `null` for a self-reported out nobody has claimed yet). `serverTime` lets the client correct clock skew. `404` unknown game.
 
 Fields added in this version (`result`, `players.runners/total/unreachable`) are additive; older clients ignore them.

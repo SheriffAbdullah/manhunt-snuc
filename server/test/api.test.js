@@ -75,6 +75,15 @@ test("full game: join, catch, self-out dedupe, board, feed, conversion", async (
   assert.equal(s.players.alive, 0);
   assert.equal(s.ended, false, "still inside the head start, so an empty field does not end the game yet");
   assert.equal((await call("GET", "/v1/games/abc123")).headers["cache-control"], "no-store");
+  // Per-phone view: the runner learns a hunter logged them; the hunter sees credited catches.
+  assert.equal(s.me, undefined, "no pid, no me block");
+  const meR = (await call("GET", "/v1/games/abc123?pid=runner-02")).json().me;
+  assert.deepEqual(meR, { role: "runner", outAt: T0 + 61_000, catches: 0 });
+  const meH = (await call("GET", "/v1/games/abc123?pid=hunter-01")).json().me;
+  assert.deepEqual(meH, { role: "hunter", outAt: null, catches: 2 });
+  assert.equal((await call("GET", "/v1/games/abc123?pid=nobody-99")).json().me, null);
+  assert.equal((await call("GET", "/v1/games/abc123?pid=x")).statusCode, 400);
+  assert.equal((await call("GET", "/v1/games/abc123?junk=1")).statusCode, 400);
   await app.close();
 });
 

@@ -57,6 +57,10 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     board: db.prepare(`SELECT hunter_name name, COUNT(*) catches FROM outs
       WHERE game_id=? AND hunter_pid IS NOT NULL GROUP BY hunter_pid ORDER BY catches DESC, MIN(t) ASC LIMIT 10`),
     feed: db.prepare("SELECT t, hunter_name hunter, runner_name runner FROM outs WHERE game_id=? ORDER BY t DESC LIMIT 15"),
+    me: db.prepare(`SELECT p.role role,
+      (SELECT MIN(t) FROM outs o WHERE o.game_id=p.game_id AND o.key=p.key) outAt,
+      (SELECT COUNT(*) FROM outs o WHERE o.game_id=p.game_id AND o.hunter_pid=p.pid) catches
+      FROM players p WHERE p.game_id=? AND p.pid=?`),
     purge: db.prepare("DELETE FROM games WHERE expires_at < ?"),
   };
 
@@ -89,7 +93,15 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     return g;
   };
 
-  const view = (g0) => {
+  // `me` is this phone's own view (did a hunter log me? how many catches did I
+  // get credit for?) so a phone that was dead or offline can catch up.
+  const meView = (g, pid) => {
+    if (!pid) return undefined;
+    const m = q.me.get(g.id, pid);
+    return m ? { role: m.role, outAt: m.outAt ?? null, catches: m.catches } : null;
+  };
+
+  const view = (g0, pid) => {
     const g = settle(g0);
     const c = countsOf(g), t = now();
     const ended = g.ended_at != null || t > g.end_at;
@@ -105,6 +117,7 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
       players: { hunters: c.hunters, alive: c.alive, runners: c.runners, total: c.total, unreachable: c.unreachable }, caught: c.caught,
       board: q.board.all(g.id), feed: q.feed.all(g.id),
       serverTime: t,
+      ...(pid !== undefined ? { me: meView(g, pid) } : {}),
     };
   };
 
@@ -142,11 +155,16 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     return reply.code(201).send(view(q.game.get(id)));
   });
 
-  app.get("/v1/games/:id", { schema: { params: { type: "object", properties: { id: ID }, required: ["id"] } } }, async (req, reply) => {
+  app.get("/v1/games/:id", {
+    schema: {
+      params: { type: "object", properties: { id: ID }, required: ["id"] },
+      querystring: { type: "object", additionalProperties: false, properties: { pid: PID } },
+    },
+  }, async (req, reply) => {
     const g = q.game.get(req.params.id);
     if (!g) return reply.code(404).send({ error: "no such game" });
     noStore(reply);
-    return view(g);
+    return view(g, req.query.pid);
   });
 
   app.post("/v1/games/:id/events", {
