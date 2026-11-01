@@ -22,6 +22,12 @@ window.CAMPUS = {
 
   defaults: { headStartMin: 5, durationMin: 45 },
 
+  // Live scoreboard server (see server/API.md), e.g. "https://manhunt-api.example.com".
+  // Leave empty to run fully offline: no network calls, no sync UI. When set,
+  // phones send only their random codename, the random game id and
+  // join/catch/out events. Never location. Games are deleted 24 h after they end.
+  api: "",
+
   // Impersonal codenames: "<adjective> <noun>".
   adjectives: ["Silver", "Quiet", "Swift", "Amber", "Cobalt", "Lunar", "Mellow", "Rapid", "Velvet", "Hidden", "Bright", "Dusky"],
   nouns: ["Falcon", "Otter", "Heron", "Lynx", "Gecko", "Panda", "Raven", "Fox", "Ibis", "Moth", "Wolf", "Crane"],

@@ -1,7 +1,7 @@
 // Bump VERSION whenever a shell file changes so old caches are dropped.
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = `manhunt-${VERSION}`;
-const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "mapview.js", "editor.js", "maps.json", "icon.svg", "icon-192.png", "icon-512.png", "manifest.webmanifest", "vendor/qrcode.min.js"];
+const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "mapview.js", "editor.js", "sync.js", "maps.json", "icon.svg", "icon-192.png", "icon-512.png", "manifest.webmanifest", "vendor/qrcode.min.js"];
 // Leaflet is needed to draw the map offline. Cached best-effort: a failed CDN fetch must not block install.
 const CDN = [
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
@@ -29,7 +29,9 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(caches.match(url).then((m) => m || fetch(e.request).then((r) => { if (r.ok) caches.open(CACHE).then((c) => c.put(url, r.clone())); return r; })));
     return;
   }
-  if (new URL(url).origin !== location.origin) return; // never cache map tiles
+  const u = new URL(url);
+  if (u.origin !== location.origin) return; // never cache map tiles or the sync API
+  if (u.pathname.includes("/v1/")) return; // sync API on the same origin: live data, never cached
   // Same-origin shell: network first so edits go live, cache as offline fallback.
   e.respondWith(fetch(e.request).then((r) => {
     if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
