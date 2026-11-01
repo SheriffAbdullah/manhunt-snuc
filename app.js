@@ -1,7 +1,9 @@
-// Manhunt PWA. No backend: the whole game lives in the share link (URL hash),
-// so every phone computes the same clock from the same start time.
+// Manhunt PWA. The whole game lives in the share link (URL hash), so every
+// phone computes the same clock from the same start time without a server.
+// The optional live scoreboard (sync.js) is layered on top and off by default.
 (() => {
   const C = window.CAMPUS;
+  const S = window.MHSync;
   const $app = document.getElementById("app");
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -106,6 +108,7 @@
 
   // ---- identity (random, impersonal) -------------------------------------------
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const newGameId = () => { const a = new Uint8Array(6); crypto.getRandomValues(a); return Array.from(a, (x) => "abcdefghijklmnopqrstuvwxyz0123456789"[x % 36]).join(""); };
   const codename = () => {
     let n = store.get("manhunt:codename");
     if (!n || typeof n !== "string" || !C.adjectives.includes(n.split(" ")[0]) || !C.nouns.includes(n.split(" ")[1])) {
@@ -274,7 +277,10 @@
       safetyCard(),
       h("div", { class: "row" },
         h("button", { class: "ghost", onclick: () => nav("editor") }, "Map editor")),
-      h("p", { class: "muted tiny center" }, "Location is read on your phone only and never sent anywhere. Catches are stored on this phone."),
+      h("p", { class: "muted tiny center" }, "Location is read on your phone only and never sent anywhere. ",
+        S.enabled()
+          ? "The live scoreboard receives only your random codename, the random game id and catch events. Games are deleted 24 hours after they end."
+          : "Catches are stored on this phone."),
     );
   }
 
@@ -319,7 +325,7 @@
       const s = new Date(when.value).getTime();
       if (!Number.isFinite(s)) return toast("Pick a valid start time.");
       if (s < Date.now() - 60000) return toast("Start time is in the past.");
-      const g = { i: Math.random().toString(36).slice(2, 8), c: zone.value, s, h: +head.value, d: +dur.value, r: "r" };
+      const g = { i: newGameId(), c: zone.value, s, h: +head.value, d: +dur.value, r: "r" };
       if (stop.value) {
         const [hh, mm] = stop.value.split(":").map(Number);
         let e = new Date(s); e.setHours(hh, mm, 0, 0); e = e.getTime();
@@ -411,6 +417,23 @@
     tick(); timer = setInterval(tick, 1000);
     const { end } = times(g);
 
+    // Live scoreboard: register the game with the host key kept on this phone.
+    // Retried from here if the first attempt failed (e.g. no signal).
+    const liveVal = h("b", {});
+    const liveRetry = h("button", { class: "ghost sm", hidden: true }, "Retry");
+    const liveRow = S.enabled() ? h("div", { class: "kv live-kv" }, h("span", {}, "Live scoreboard"), h("span", { class: "live-val" }, liveVal, liveRetry)) : null;
+    const register = async () => {
+      liveVal.textContent = "connecting…"; liveRetry.hidden = true;
+      const r = await S.createGame(g, label);
+      if (!document.body.contains(liveVal)) return;
+      if (r.ok) liveVal.textContent = "on";
+      else if (r.status === 403) liveVal.textContent = "off (game id already in use; change settings to get a new one)";
+      else if (r.status === 400) liveVal.textContent = "off (the server rejected these settings)";
+      else { liveVal.textContent = "off, server not reachable"; liveRetry.hidden = false; }
+    };
+    liveRetry.addEventListener("click", register);
+    if (liveRow) register();
+
     shell(
       h("div", { class: "page-head" }, h("a", { class: "icon-btn", href: "#", "aria-label": "Home" }, icon("back")), h("h1", {}, "Game ready")),
       h("div", { class: "card summary" },
@@ -421,6 +444,7 @@
         g.e ? h("div", { class: "kv" }, h("span", {}, "Hard stop"), h("b", {}, clockTime(g.e))) : null,
         g.k ? h("div", { class: "kv" }, h("span", {}, "Mode"), h("b", {}, "Caught runners join the hunt")) : null,
         h("div", { class: "kv" }, h("span", {}, "Starts in"), count),
+        liveRow,
         h("button", { class: "ghost sm", onclick: () => { store.set("manhunt:draft", { c: g.c, h: g.h, d: g.d, k: !!g.k, e: g.e, s: g.s }); nav("host"); } }, "Change settings")),
       h("p", { class: "muted" }, "Send the runner link to runners and the hunter link to hunters. The role is baked into the link."),
       seg,
@@ -443,6 +467,16 @@
     const isHunter = g.r === "h" || converted;
     const myCode = myTagCode(g.i, name);
     const skewed = g.s - Date.now() > 36 * 3600000;
+    // Live scoreboard state (only used when sync is on).
+    const sync = S.enabled(), keyEnded = `manhunt:ended:${g.i}`;
+    let live = null, liveState = "connecting", liveJson = "", skewMs = 0;
+    // The host can end the game early for everyone; that override wins over the clock.
+    const phase = (now) => {
+      const p = phaseOf(g, now), e = store.get(keyEnded, null);
+      if (Number.isFinite(e) && p.key !== "over") return { key: "over", left: 0, headEnd: p.headEnd, end: Math.min(e, p.end), early: true };
+      return p;
+    };
+    if (sync) S.join(g.i, { name, role: isHunter ? "hunter" : "runner", code: myCode });
 
     wantWake = true; requestWake();
 
@@ -457,7 +491,7 @@
       pre: { label: "Starts in", sub: (p) => `Head start ${clockTime(g.s)} · hunters released ${clockTime(p.headEnd)}` },
       head: { label: isHunter ? "Hunters frozen" : "Head start. Run!", sub: (p) => (isHunter ? `Released at ${clockTime(p.headEnd)}` : `Hunters released at ${clockTime(p.headEnd)}`) },
       hunt: { label: "Hunt ends in", sub: (p) => `Ends ${clockTime(p.end)}${g.e && g.e === p.end ? " (hard stop)" : ""}` },
-      over: { label: "Game over", sub: (p) => `Ended ${clockTime(p.end)}` },
+      over: { label: "Game over", sub: (p) => (p.early ? `Ended by the host at ${clockTime(p.end)}` : `Ended ${clockTime(p.end)}`) },
     };
 
     const runnerPanel = (p) => {
@@ -467,9 +501,12 @@
           h("div", { class: "card-head" }, h("strong", {}, "You're out"), h("span", { class: "muted" }, typeof out === "object" ? clockTime(out.t) : "")),
           h("p", { class: "muted" }, g.k ? "Caught runners hunt now. Switch roles when you're ready." : "Head to the meeting point and cheer on the others."),
           g.k && p.key !== "over" ? h("button", { class: "hunter", onclick: () => { store.set(keyRole, "h"); play(g); } }, "Join the hunters") : null,
-          h("button", { class: "ghost sm", onclick: () => { store.del(keyOut); render(true); } }, "Undo (misclick)"));
+          p.key === "over" ? finalBoard() : null,
+          p.key === "over" ? resultButtons() : null,
+          h("button", { class: "ghost sm", onclick: () => { store.del(keyOut); render(true); } }, "Undo (misclick)"),
+          sync ? h("p", { class: "muted tiny" }, "Undo only fixes this phone; the live scoreboard keeps the out.") : null);
       }
-      if (p.key === "over") return h("div", { class: "card result" }, h("div", { class: "card-head" }, icon("check"), h("strong", {}, "You survived")), h("p", { class: "muted" }, `Never caught in ${g.d} minutes of hunting.`), resultButtons());
+      if (p.key === "over") return h("div", { class: "card result" }, h("div", { class: "card-head" }, icon("check"), h("strong", {}, "You survived")), h("p", { class: "muted" }, p.early ? "Never caught before the host ended the game." : `Never caught in ${g.d} minutes of hunting.`), finalBoard(), resultButtons());
       return h("div", { class: "card tag" },
         h("p", { class: "muted" }, "Tagged? Show the hunter this, then press the button below."),
         h("div", { class: "code-name" }, name.toUpperCase()),
@@ -486,14 +523,21 @@
         h("div", { class: `card ${p.key === "over" ? "result" : ""}` },
           h("div", { class: "card-head" }, h("strong", {}, p.key === "over" ? `Final: ${log.length} catch${log.length === 1 ? "" : "es"}` : `Catches: ${log.length}`), h("span", { class: "muted tiny" }, "this phone")),
           log.length ? h("ul", { class: "log" }, log.map((e) => h("li", {}, h("b", {}, e.n || "Unknown runner"), h("span", { class: "muted" }, ` ${e.c} · ${clockTime(e.t)}`)))) : h("p", { class: "muted" }, "No catches logged."),
+          p.key === "over" ? finalBoard() : null,
           p.key === "over" ? resultButtons() : null));
     };
 
+    // Final numbers from the live scoreboard, when there are any.
+    const boardList = (b) => h("ol", { class: "board" }, b.map((x) => h("li", {}, h("span", { class: "board-name" }, x.name || "?"), h("b", {}, String(x.catches)))));
+    const finalBoard = () => (live ? h("div", { class: "final" },
+      h("div", { class: "card-head" }, h("strong", {}, "Everyone"), h("span", { class: "muted tiny" }, `${live.caught} caught · ${live.alive} survived`)),
+      live.board.length ? boardList(live.board) : h("p", { class: "muted tiny" }, "No catches were logged.")) : null);
     const resultText = () => {
       const log = hunterLog(), out = store.get(keyOut, null);
       const head = `Manhunt · ${label} · ${whenText(g.s)}`;
-      if (isHunter) return `${head}\nHunter ${name}: ${log.length} catch${log.length === 1 ? "" : "es"}\n${log.map((e) => `• ${e.n || "?"} (${e.c}) ${clockTime(e.t)}`).join("\n")}`.trim();
-      return `${head}\nRunner ${name}: ${out ? `caught at ${clockTime(typeof out === "object" ? out.t : times(g).end)}` : "survived"}`;
+      const all = live ? `\nEveryone: ${live.caught} caught, ${live.alive} survived${live.board.length ? `\nTop hunters: ${live.board.slice(0, 5).map((b) => `${b.name} ${b.catches}`).join(", ")}` : ""}` : "";
+      if (isHunter) return `${head}\nHunter ${name}: ${log.length} catch${log.length === 1 ? "" : "es"}\n${log.map((e) => `• ${e.n || "?"} (${e.c}) ${clockTime(e.t)}`).join("\n")}`.trim() + all;
+      return `${head}\nRunner ${name}: ${out ? `caught at ${clockTime(typeof out === "object" ? out.t : times(g).end)}` : "survived"}${all}`;
     };
     const resultButtons = () => h("div", { class: "row" },
       h("button", { class: "ghost sm", onclick: () => copyOrShare(resultText(), { title: "Manhunt results" }) }, icon("share", 16), " Share result"),
@@ -516,6 +560,7 @@
           const log = hunterLog();
           if (log.some((e) => e.c === v && e.n === n)) return (err.textContent = "Already logged.");
           store.set(keyLog, [...log, { n, c: v, t: Date.now() }]);
+          if (sync) S.report(g.i, { type: "catch", name, runner: { name: n, code: v } });
           d.close(); vibrate([80, 40, 80]); toast(`Caught ${n}`); render(true);
         } }, "Verify & log"));
       setTimeout(() => adj.focus(), 50);
@@ -524,12 +569,67 @@
       const d = sheet("Were you tagged?",
         h("p", { class: "muted" }, "Show the hunter your code first so they can log it, then confirm."),
         h("div", { class: "code-name" }, name.toUpperCase()), h("div", { class: "code-digits" }, myCode),
-        h("button", { class: "runner big", onclick: () => { store.set(keyOut, { t: Date.now() }); d.close(); vibrate([400]); render(true); } }, "Yes, I'm out"));
+        h("button", { class: "runner big", onclick: () => { store.set(keyOut, { t: Date.now() }); if (sync) S.report(g.i, { type: "out", name, code: myCode }); d.close(); vibrate([400]); render(true); } }, "Yes, I'm out"));
     };
+
+    // Live scoreboard card: polled every ~5 s while the screen is visible.
+    const liveCard = sync ? h("div", { class: "card live" }) : null;
+    const skewNote = h("div", { class: "notice", hidden: true });
+    const endForAll = async () => {
+      if (!confirm("End the game for everyone now? Every phone will show game over.")) return;
+      const r = await S.endGame(g.i);
+      if (!r.ok) return toast(r.status === 403 ? "This phone doesn't hold the host key." : "Couldn't reach the server. Try again.");
+      live = r.data; liveState = "live"; applyEnded();
+    };
+    const applyEnded = () => {
+      if (!live || !live.ended) return;
+      if (!Number.isFinite(store.get(keyEnded, null))) { store.set(keyEnded, Math.min(Date.now(), live.endedAt || Date.now())); render(true); }
+      else paintLive();
+    };
+    const paintLive = () => {
+      if (!liveCard) return;
+      const pending = S.pending(g.i);
+      const chipText = liveState === "live" ? (live && live.ended ? "Final" : pending ? "Live · syncing" : "Live") : liveState === "nogame" ? "Waiting for the host's phone" : liveState === "connecting" ? "Connecting…" : "Offline, scores will sync";
+      const kids = [h("div", { class: "card-head" }, h("strong", {}, "Live scoreboard"), h("span", { class: `live-chip ${liveState}` }, chipText))];
+      if (live) {
+        kids.push(h("div", { class: "live-stats" },
+          h("div", {}, h("b", {}, String(live.alive)), h("span", {}, "runners left")),
+          h("div", {}, h("b", {}, String(live.hunters)), h("span", {}, "hunters")),
+          h("div", {}, h("b", {}, String(live.caught)), h("span", {}, "caught"))));
+        if (live.board.length) kids.push(h("h3", { class: "live-h" }, "Top hunters"), boardList(live.board.slice(0, 5)));
+        if (live.feed.length) kids.push(h("h3", { class: "live-h" }, "Latest"), h("ul", { class: "feed" }, live.feed.slice(0, 5).map((f) =>
+          h("li", {}, h("span", {}, f.hunter ? [h("b", {}, f.hunter), " caught ", h("b", {}, f.runner)] : [h("b", {}, f.runner), " is out"]), h("span", { class: "muted" }, clockTime(f.t))))));
+        if (!live.board.length && !live.feed.length) kids.push(h("p", { class: "muted tiny" }, "No catches yet."));
+      } else if (liveState === "nogame") kids.push(h("p", { class: "muted tiny" }, "The host's phone hasn't registered this game yet. Your catches are saved here and will sync."));
+      if (S.hasHostKey(g.i) && !(live && live.ended)) kids.push(h("button", { class: "ghost danger", onclick: endForAll }, "End game for everyone"));
+      liveCard.replaceChildren(...kids);
+      const off = Math.abs(skewMs) > 20000;
+      skewNote.hidden = !off;
+      if (off) skewNote.textContent = `This phone's clock is about ${Math.round(Math.abs(skewMs) / 1000)} s ${skewMs > 0 ? "behind" : "ahead"}. Turn on automatic date & time in Settings so countdowns match.`;
+    };
+    let pollTimer = null;
+    const onScreen = () => document.body.contains(band);
+    const pollLater = (ms) => { clearTimeout(pollTimer); pollTimer = setTimeout(doPoll, ms); };
+    const doPoll = async () => {
+      clearTimeout(pollTimer); pollTimer = null;
+      if (!sync || !onScreen() || document.visibilityState !== "visible") return;
+      const r = await S.poll(g.i);
+      if (!onScreen()) return;
+      if (r.ok) {
+        liveState = "live"; skewMs = r.skew;
+        const j = JSON.stringify(r.data); const changed = j !== liveJson; liveJson = j; live = r.data;
+        applyEnded();
+        if (changed && phase(Date.now()).key === "over") render(true); else paintLive();
+      } else { liveState = r.status === 404 ? "nogame" : "offline"; paintLive(); }
+      if (!(live && live.ended)) pollLater((phase(Date.now()).key === "over" ? 15000 : 4500) + Math.random() * 1000);
+    };
+    const onVis = () => { if (!onScreen()) return document.removeEventListener("visibilitychange", onVis); if (document.visibilityState === "visible") doPoll(); else clearTimeout(pollTimer); };
+    const onSync = () => { if (!onScreen()) return document.removeEventListener("mh:sync", onSync); paintLive(); };
+    if (sync) { document.addEventListener("visibilitychange", onVis); document.addEventListener("mh:sync", onSync); }
 
     let lastKey = null, soonDone = false;
     const render = (force) => {
-      const now = Date.now(), p = phaseOf(g, now);
+      const now = Date.now(), p = phase(now);
       clock.textContent = fmt(p.left);
       if (p.key === "hunt" && p.left <= 60000 && !soonDone) { soonDone = true; CUES.soon(); }
       if (p.key === lastKey && !force) return;
@@ -538,6 +638,7 @@
       band.className = `band ${p.key} ${isHunter ? "is-hunter" : "is-runner"}`;
       phaseEl.textContent = PHASE[p.key].label; subEl.textContent = PHASE[p.key].sub(p);
       action.replaceChildren(isHunter ? hunterPanel(p) : runnerPanel(p));
+      paintLive();
       const out = store.get(keyOut, null);
       bottom.replaceChildren(
         h("button", { class: "ghost sos", onclick: () => sosSheet(name) }, "SOS"),
@@ -562,7 +663,9 @@
         h("span", { class: "who" }, name),
         wakeChip, soundBtn),
       skewed ? h("div", { class: "notice" }, "This game starts more than a day from now. If that's wrong, check this phone's clock or ask the host for a fresh link.") : null,
+      skewNote,
       band, action,
+      liveCard,
       mapCard(cfg, label),
       safetyCard(),
       h("button", { class: "ghost", onclick: () => { if (confirm("Leave this game screen? Your link still works.")) nav(""); } }, "Leave game"),
@@ -571,6 +674,7 @@
     );
     render(true);
     timer = setInterval(() => render(false), 1000);
+    if (sync) doPoll();
   }
 
   // Live map. Your position is read on this phone only and never sent anywhere.
