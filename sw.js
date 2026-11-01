@@ -1,7 +1,7 @@
 // Bump VERSION whenever a shell file changes so old caches are dropped.
-const VERSION = "v4";
+const VERSION = "v5";
 const CACHE = `manhunt-${VERSION}`;
-const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "mapview.js", "editor.js", "sync.js", "maps.json", "icon.svg", "icon-192.png", "icon-512.png", "manifest.webmanifest", "vendor/qrcode.min.js"];
+const SHELL = ["./", "index.html", "styles.css", "app.js", "ui.js", "core.js", "device.js", "game.js", "config.js", "mapview.js", "editor.js", "sync.js", "maps.json", "icon.svg", "icon-192.png", "icon-512.png", "manifest.webmanifest", "vendor/qrcode.min.js"];
 // Leaflet is needed to draw the map offline. Cached best-effort: a failed CDN fetch must not block install.
 const CDN = [
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
