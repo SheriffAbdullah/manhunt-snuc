@@ -7,8 +7,8 @@ window.MHDevice = (() => {
   // ---- cues: vibration + a short beep ----------------------------------------
   // Browsers block audio until the user has touched the page, so the context is
   // created/resumed on the first pointerdown and beeps are skipped until then.
-  let audio = null;
-  const unlockAudio = () => { try { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch {} };
+  let audio = null, gestured = false;
+  const unlockAudio = () => { gestured = true; try { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch {} };
   addEventListener("pointerdown", unlockAudio, { passive: true });
   const soundOn = () => store.get("manhunt:sound", true);
   const audioReady = () => !!audio && audio.state === "running";
@@ -26,7 +26,8 @@ window.MHDevice = (() => {
     } catch {}
   };
   const canVibrate = () => typeof navigator.vibrate === "function";
-  const vibrate = (p) => { try { canVibrate() && navigator.vibrate(p); } catch {} };
+  // Chrome ignores (and logs) vibrate() before the first touch, so wait for one.
+  const vibrate = (p) => { try { gestured && canVibrate() && navigator.vibrate(p); } catch {} };
   const CUES = {
     head: () => { vibrate([300, 100, 300]); beep([[660, 0.12], [880, 0.2]]); },
     hunt: () => { vibrate([200, 80, 200, 80, 600]); beep([[523, 0.1], [659, 0.1], [784, 0.1], [1046, 0.35]]); },
