@@ -1,0 +1,25 @@
+services:
+  manhunt:
+    build:
+      context: .
+      network: host   # default bridge is throttled on the abd-server host (see abd-server docs/services.md)
+    image: manhunt-server:latest
+    container_name: manhunt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8084:8084"
+    environment:
+      PORT: "8084"
+      DB_PATH: /data/manhunt.db
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://sheriffabdullah.github.io}
+      LOG_LEVEL: info
+    volumes:
+      - manhunt_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  manhunt_data:

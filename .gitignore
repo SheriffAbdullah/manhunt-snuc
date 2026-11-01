@@ -1,3 +1,7 @@
 .impeccable/
 .npm-cache/
 .DS_Store
+
+server/node_modules
+server/.npm-cache
+server/.impeccable
