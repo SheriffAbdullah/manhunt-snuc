@@ -605,10 +605,13 @@
       if (!navigator.geolocation) return (status.textContent = "Location isn't supported on this phone.");
       if (watch != null) return;
       status.textContent = "Finding you…";
+      // watchPosition keeps running after a transient error, so only a
+      // permission denial ends the watch and brings the button back.
       watch = navigator.geolocation.watchPosition(onPos, (e) => {
-        watch = null; status.className = "status";
-        status.textContent = e && e.code === 1 ? "Location blocked. Allow it for this site in your browser settings." : "Couldn't get a fix. Try again outdoors.";
-        btn.hidden = false;
+        if (e && e.code === 1) {
+          navigator.geolocation.clearWatch(watch); watch = null; btn.hidden = false;
+          status.className = "status"; status.textContent = "Location blocked. Allow it for this site in your browser settings.";
+        } else if (!dot) { status.className = "status"; status.textContent = "Still looking for a GPS fix. Stay outdoors."; }
       }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
       btn.hidden = true;
     });
