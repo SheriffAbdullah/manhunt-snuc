@@ -28,7 +28,7 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     methods: ["GET", "PUT", "POST"],
     maxAge: 86400,
   });
-  app.register(rateLimit, { global: true, max: 3000, timeWindow: "1 minute" });
+  app.register(rateLimit, { global: true, max: 30000, timeWindow: "1 minute" });
 
   const q = {
     game: db.prepare("SELECT * FROM games WHERE id = ?"),
@@ -60,6 +60,7 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     hits.set(pid, arr);
     return arr.length > EVENTS_PER_MIN_PER_PID;
   };
+  const sweepHits = () => { const t = now(); for (const [k, v] of hits) if (!v.length || t - v[v.length - 1] > 60_000) hits.delete(k); };
 
   const view = (g) => {
     const c = q.counts.get({ g: g.id });
@@ -163,7 +164,7 @@ export function buildApp({ dbPath = ":memory:", origins = [], now = () => Date.n
     return view(q.game.get(g.id));
   });
 
-  const timer = setInterval(() => { q.purge.run(now()); }, purgeEveryMs);
+  const timer = setInterval(() => { q.purge.run(now()); sweepHits(); }, purgeEveryMs);
   timer.unref();
   app.addHook("onClose", async () => { clearInterval(timer); db.close(); });
   app.decorate("purgeNow", () => q.purge.run(now()).changes);
