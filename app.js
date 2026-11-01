@@ -593,7 +593,7 @@
       const { latitude: la, longitude: lo, accuracy } = p.coords;
       if (map) {
         if (!dot) { ring = L.circle([la, lo], { radius: accuracy || 0, color: "#4aa3ff", weight: 1, fillOpacity: 0.1 }).addTo(map); dot = L.circleMarker([la, lo], { radius: 8, color: "#fff", fillColor: "#4aa3ff", fillOpacity: 1, weight: 3 }).addTo(map); map.setView([la, lo], Math.max(map.getZoom(), 17)); }
-        else { dot.setLatLng([la, lo]); ring.setLatLng([la, lo]); ring.setRadius(accuracy || 0); }
+        else { dot.setLatLng([la, lo]); ring.setLatLng([la, lo]); ring.setRadius(accuracy || 0); if (!map.getBounds().contains([la, lo])) map.panTo([la, lo]); }
       }
       const r = MH.check(cfg, la, lo);
       status.className = "status " + r.s;

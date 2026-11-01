@@ -13,6 +13,7 @@
 :root[data-theme="dark"]{ --bg:#0b0d12; --panel:#151922; --panel-2:#1c2130; --line:#2a3140; --text:#f3f5f9; --muted:#a3adbe; --shadow:0 10px 30px rgba(0,0,0,.35); color-scheme:dark; }
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 html,body{margin:0;background:var(--bg);color:var(--text);font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 body{min-height:100dvh;overflow-x:hidden}
