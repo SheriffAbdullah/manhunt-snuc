@@ -1,7 +1,11 @@
 // Campus configuration. Edit this file to adapt Manhunt to your campus.
 // Nothing here is personal: no names, no accounts, no tracking.
 window.CAMPUS = {
-  name: "SNUC",
+  // Shown under the wordmark and in the About line. One university, one campus:
+  // SSN College of Engineering became the SSN School of Engineering within
+  // Shiv Nadar University Chennai from the 2026-27 academic year.
+  name: "Shiv Nadar University Chennai",
+  place: "Kalavakkam",
   tagline: "Campus Manhunt",
 
   // Always out of bounds, whatever zone is picked.
@@ -25,7 +29,7 @@ window.CAMPUS = {
   // Live scoreboard server (see server/API.md), e.g. "https://manhunt-api.example.com".
   // Leave empty to run fully offline: no network calls, no sync UI. When set,
   // phones send only their random codename, the random game id and
-  // join/catch/out events. Never location. Games are deleted 24 h after they end.
+  // join/catch/out/ping events. Never location. Games are deleted 24 h after they end.
   api: "",
 
   // Impersonal codenames: "<adjective> <noun>".

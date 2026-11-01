@@ -1,7 +1,7 @@
 {
-  "name": "SNUC Manhunt",
+  "name": "Campus Manhunt · Shiv Nadar University Chennai",
   "short_name": "Manhunt",
-  "description": "Campus hide-and-chase from one share link. No accounts, no tracking.",
+  "description": "Campus hide-and-chase at Shiv Nadar University Chennai, from one share link. No accounts, no tracking.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

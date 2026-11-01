@@ -106,9 +106,10 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .pill.hunter{color:var(--hunter);border-color:var(--hunter)}
 .pill.runner{color:var(--runner);border-color:var(--runner)}
 .role-row{display:flex;align-items:center;gap:8px;margin:4px 0 10px}
+.role-row .chip-btn{flex:none}
 .who{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chip-status{font-size:.75rem;color:var(--muted)}
-.chip-btn{width:auto;margin:0;min-height:32px;padding:4px 10px;font-size:.78rem;border-radius:99px;background:var(--panel);font-weight:600}
+.chip-status{margin:-4px 0 10px;text-align:center}
+.chip-btn{width:auto;margin:0;min-height:36px;padding:4px 12px;font-size:.8rem;border-radius:99px;background:var(--panel);font-weight:600;white-space:nowrap}
 
 /* game band: the one thing readable at arm's length in sunlight */
 .band{border-radius:20px;padding:18px 16px 16px;text-align:center;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);margin:6px 0 12px}
@@ -216,3 +217,50 @@ dialog.sheet::backdrop{background:rgba(0,0,0,.55)}
 #toast.show{opacity:1;transform:translateX(-50%)}
 
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
+
+/* brand wordmark (typographic, no logos) */
+.brand{letter-spacing:0;text-transform:none;font-size:1rem}
+.brand-text{display:flex;flex-direction:column;line-height:1.1}
+.brand-name{font-weight:800;letter-spacing:.02em}
+.brand-sub{font-size:.68rem;letter-spacing:.04em}
+.about{margin-top:18px}
+
+/* notices */
+.notices:empty{display:none}
+.notice.warn{background:var(--hunter);color:#fff}
+.notice.dim{background:var(--panel-2);color:var(--text);border:1px solid var(--line);font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.notice.dim svg{flex:none;color:var(--accent)}
+.link-btn{display:inline;width:auto;min-height:0;margin:0;padding:0 2px;border:0;background:none;color:var(--accent);font:inherit;font-weight:800;text-decoration:underline;text-underline-offset:2px}
+
+/* results */
+.card.result{border-width:2px}
+.card.result.hunters{border-color:var(--hunter)}
+.card.result.runners{border-color:var(--runner)}
+.card.result.neutral{border-color:var(--accent)}
+.result-head{display:flex;align-items:flex-start;gap:12px}
+.result-head svg{flex:none;margin-top:2px;color:var(--accent)}
+.card.result.hunters .result-head svg{color:var(--hunter)}
+.card.result.runners .result-head svg{color:var(--runner)}
+.result-title{margin:0;font-size:1.6rem;line-height:1.1;color:var(--text);text-transform:none;letter-spacing:-.01em;font-weight:900}
+.result-head p{margin:2px 0 0}
+.result-mine{margin:12px 0 4px;font-weight:600;padding:10px 12px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}
+.result-mine.win{border-color:var(--accent)}
+.host-box{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.host-box .card-head{margin-bottom:2px}
+.host-box .card-head svg{color:var(--accent)}
+.host-box .row>button.sm{flex:1;margin-top:8px}
+ul.list .state.done{color:var(--accent);font-weight:700}
+ul.list .state.live{color:var(--runner);font-weight:700}
+
+/* chips */
+.chip-btn.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.chip-btn svg{display:block}
+.live-chip.offline{color:var(--hunter)}
+.live-chip.offline::before{background:var(--hunter)}
+
+/* GPS */
+.status.weak{padding:12px;background:var(--panel-2);border-color:var(--accent);color:var(--text);font-weight:700}
+
+/* low-power mode: no motion at all, cheaper paints */
+html.lowpower *{animation:none!important;transition:none!important}
+html.lowpower .band{box-shadow:none}
