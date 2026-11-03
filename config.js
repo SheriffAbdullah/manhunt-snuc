@@ -30,7 +30,7 @@ window.CAMPUS = {
   // Leave empty to run fully offline: no network calls, no sync UI. When set,
   // phones send only their random codename, the random game id and
   // join/catch/out/ping events. Never location. Games are deleted 24 h after they end.
-  api: "",
+  api: "https://manhunt.galegcy.com",
 
   // Impersonal codenames: "<adjective> <noun>".
   adjectives: ["Silver", "Quiet", "Swift", "Amber", "Cobalt", "Lunar", "Mellow", "Rapid", "Velvet", "Hidden", "Bright", "Dusky"],
